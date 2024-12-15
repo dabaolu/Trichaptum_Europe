@@ -1,0 +1,23 @@
+// Priors and rules file
+// *********************
+
+[PARAMETERS]
+//#isInt? #name   #dist.#min  #max
+//all N are in number of haploid individuals
+1  Npop0       unif     1000  100000   output
+1  Npop1       unif     1000  100000   output
+1  Npop2       unif     1000  100000   output
+1  Npop3       unif     1000  100000   out√put
+1  TDIV01      unif     5000  100000   output
+0  a_1_2       unif     0     1        output
+0  a_1_3       unif     0     1        output
+0  PROP1       logunif  0.001 0.999    hide
+0  PROP2       logunif  0.001 0.999    hide
+0  RESIZE1     logunif  0.1   100      hide
+0  RESIZE2     logunif  0.1   100      hide
+0  RESIZE3     logunif  0.1   100      hide
+[RULES]
+
+[COMPLEX PARAMETERS]
+1  TAdm1 = TDIV01*PROP1 output
+1  TAdm2 = TDIV01*PROP2 output
