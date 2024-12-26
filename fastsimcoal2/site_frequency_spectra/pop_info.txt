@@ -1,0 +1,4 @@
+#pop0 -> Eurasia
+#pop1 -> Europe
+#pop2 -> EuroAdmix_C
+#pop3 -> Atlantic
