@@ -1,0 +1,172 @@
+---
+title: "Windows_Gene"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r }
+#BiocManager::install("rtracklayer")
+library(rtracklayer)
+library(dplyr)
+#install.packages("reshape2")
+library(reshape2)
+library(tidyr)
+library(stringr)
+#BiocManager::install("topGO")
+library(topGO)
+#BiocManager::install("Rgraphviz")
+library(Rgraphviz)
+library(ggplot2)
+
+setwd("/Users/dabaosl/UiO Dropbox/Dabao Lu/UiO/Phd/Europe_study/Enrichment_GO_analyses")
+
+gff.file <- import("TA10106M1_final_MAKER.putative_function_domains.gff")
+gff.file <- gff.file[gff.file$type=="gene"]
+
+gff_df = as.data.frame(gff.file) #For the gene ontology
+#gff_df = gff_df[,c("Name","Ontology_term")]
+#gff_df = gff_df[,c("Name","Dbxref")]
+
+ko_file <- read.table("TA10106M1_query.ko",header =FALSE, sep="\t", fill=TRUE, col.names = c("GeneName","KO"))
+ko_file <- ko_file[!(ko_file$KO == ""),]
+ko_file <- ko_file %>%
+  mutate(tempcol = str_split(GeneName, '-')) %>%
+  rowwise() %>%
+  mutate(ID = unlist(tempcol)[1]) %>%
+  dplyr::select(-tempcol) #I need to force this because it looks topGO is masking select
+
+output_folder = "output_window1/"
+
+list_files <- list.files("input_window1/", pattern=".txt") #this is very you put a textfile of two columns
+
+list_files
+
+for(iFile in list_files){
+  FileName = unlist(strsplit(iFile,"_"))[1]
+  SNPs_data <- read.csv(paste0("input_window1/",iFile), header = TRUE, sep="\t")
+  genes_df <- data.frame()
+  for(i in 1:nrow(SNPs_data)){
+    scaffold_temp <- SNPs_data[i,"Scaffold"] #Check column name is Scaffold
+    start_pos <- SNPs_data[i,"start"]
+    end_pos <- SNPs_data[i,"end"]
+    df_temp <- gff.file[gff.file@seqnames == as.character(scaffold_temp),]
+    df_temp <- as.data.frame(df_temp)
+    df_temp <- df_temp[df_temp$start >= start_pos & df_temp$end <= end_pos,]
+    if(nrow(df_temp) != 0){
+      df_temp <- df_temp[,c("seqnames","source","start","end","Name","Alias","Note","Dbxref","Ontology_term")]
+      df_temp <- df_temp[!duplicated(df_temp[c("seqnames","source","start","end","Name","Alias","Note","Dbxref","Ontology_term")]),]
+      df_temp$Hit <- paste0("Window_",i)
+      genes_df <- rbind(genes_df,df_temp) 
+    }
+    SNPs_data[i,"Hit"] <- i
+  }
+  genes_df <- merge(genes_df,ko_file,by.x="Name",by.y="ID",all.x=TRUE)
+  genes_df[is.na(genes_df)] <- ""
+  genes_df <- apply(genes_df, 2, as.character) #DL: added to be able to output genes_df
+  write.table(genes_df, file=paste0(output_folder,FileName,"_geneInfo.tab"), row.names = FALSE,sep="\t", quote=FALSE)
+  write.csv(SNPs_data, file=paste0(output_folder,unlist(strsplit(iFile,"\\."))[1],"_processed.csv"), row.names = FALSE)
+
+  bg_genes = data.frame(GeneName = as.character(),
+                        GO.term.accession = as.character())
+  for(iRow in 1:nrow(gff_df)){
+    temp_df = gff_df[iRow,]
+    if(!(identical(unlist(temp_df$Ontology_term),character(0)))){
+      temp_go_list = unlist(temp_df$Ontology_term)
+      for(iGO in 1:length(temp_go_list)){
+        bg_temp = data.frame(GeneName = temp_df$Name,
+                                GO.term.accession = temp_go_list[iGO])
+        bg_genes = rbind(bg_genes,bg_temp)
+        #print
+      }
+    }
+  }
+  gene2GO <- tapply(bg_genes$GO.term.accession, bg_genes$GeneName, function(x)x)
+  genes_df <- as.data.frame(genes_df) ###DL: necessary to make genes_df to a dataframe again because of previous change you made
+  candidate_list = genes_df[!(identical(unlist(genes_df$Ontology_term),character(0))),"Name"]
+  tmp <- ifelse(bg_genes$GeneName %in% candidate_list, 1, 0)
+  geneList <- tmp 
+  names(geneList) <- bg_genes$GeneName
+  GOdata <- new("topGOdata",
+          ontology = "BP",
+          allGenes = geneList,
+          geneSelectionFun = function(x)(x == 1),
+          annot = annFUN.gene2GO, gene2GO = gene2GO) #Now I am running the analysis but using my GO annotation and considering labelled as 1 the selected genes in genelist
+  
+  resultFisher <- runTest(GOdata, algorithm = "elim", statistic = "fisher") #Fisher exact test
+  con <- file(paste0(output_folder,FileName,"_FisherResult.txt"), open = "wt")
+  sink(con)
+  print(resultFisher)
+  sink()
+  close(con)
+  tab <- GenTable(GOdata, raw.p.value = resultFisher, topNodes = length(resultFisher@score),
+                  numChar = 120)
+  write.table(tab, file=paste0(output_folder,FileName,"_GOenrichment.tab"), row.names = FALSE,sep="\t", quote=FALSE)
+  printGraph(GOdata, resultFisher, firstSigNodes = 5, fn.prefix = paste0(output_folder,FileName,"_GOenrichment"), useInfo = "all", pdfSW = TRUE)
+}
+
+
+#Bonferooni corrected p-value should be: 0.05 p-value/8376 genes = 5.969436e-06
+#12.10.2024: should actually be 0.05/1095=4.56621e-05? (number of go terms) FDR is probably better, but in any case
+  #correction might not be necessary as elim algorithm is used: see TopGO manual p19:       https://bioconductor.org/packages/devel/bioc/vignettes/topGO/inst/doc/topGO.pdf
+    
+
+
+#Example to extract a barplot. 
+
+#####THIS IS A QUICK GRAPH WITH UNCORRECTED VALUES, SEE THAT I DID A FISHER AN KS IS USED!!!!!!!!!!!!!!!!!!!
+results.ks <- runTest(GOdata, algorithm="classic", statistic="fisher")
+goEnrichment <- GenTable(GOdata, KS=results.ks, orderBy="KS", topNodes=20)
+goEnrichment$KS <- as.numeric(goEnrichment$KS)
+goEnrichment <- goEnrichment[goEnrichment$KS<0.05,]
+goEnrichment <- goEnrichment[,c("GO.ID","Term","KS")]
+goEnrichment$Term <- gsub(" [a-z]*\\.\\.\\.$", "", goEnrichment$Term)
+goEnrichment$Term <- gsub("\\.\\.\\.$", "", goEnrichment$Term)
+goEnrichment$Term <- paste(goEnrichment$GO.ID, goEnrichment$Term, sep=", ")
+goEnrichment$Term <- factor(goEnrichment$Term, levels=rev(goEnrichment$Term))
+
+ggplot(goEnrichment, aes(x=Term, y=-log10(KS))) +
+    stat_summary(geom = "bar", fun.y = mean, position = "dodge") +
+    xlab("Biological process") +
+    ylab("Enrichment") +
+    ggtitle("Title") +
+    scale_y_continuous(breaks = round(seq(0, max(-log10(goEnrichment$KS)), by = 2), 1)) +
+    theme_bw(base_size=24) +
+    theme(
+        legend.position='none',
+        legend.background=element_rect(),
+        plot.title=element_text(angle=0, size=24, face="bold", vjust=1),
+        axis.text.x=element_text(angle=0, size=18, face="bold", hjust=1.10),
+        axis.text.y=element_text(angle=0, size=18, face="bold", vjust=0.5),
+        axis.title=element_text(size=24, face="bold"),
+        legend.key=element_blank(),     #removes the border
+        legend.key.size=unit(1, "cm"),      #Sets overall area/size of the legend
+        legend.text=element_text(size=18),  #Text size
+        title=element_text(size=18)) +
+    guides(colour=guide_legend(override.aes=list(size=2.5))) +
+    coord_flip()
+
+
+
+
+
+
+
+
+
+```
+
+```{r}
+#Filter specific position
+scaffold_temp <- "Scaffold05"
+start_pos <- "2480001"
+end_pos <- "2500000"
+df_temp <- gff.file[gff.file@seqnames == as.character(scaffold_temp),]
+df_temp <- as.data.frame(df_temp)
+df_temp <- df_temp[df_temp$start >= start_pos & df_temp$end <= end_pos,]
+df_temp <- df_temp[,c("seqnames","source","start","end","Name","Alias","Note")]
+df_temp <- df_temp[!duplicated(df_temp[c("seqnames","source","start","end","Name","Alias","Note")]),]
+
+
+```
+
