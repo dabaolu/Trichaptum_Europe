@@ -1,0 +1,2 @@
+Scaffold	start	end
+Scaffold05	3213128	6426255
