@@ -1,3 +1,5 @@
+#script by Julia M.I. Barth
+
 #Read the illumina_1_FS.SOR.MQRS.RPRS.QD.MQ.DP.txt file into R, interpret "." as missing data
 illumina1 <- read.table("illumina_1_FS.SOR.MQRS.RPRS.QD.MQ.DP.txt",na.strings=c("."))
 
